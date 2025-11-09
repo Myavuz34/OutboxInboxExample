@@ -1,0 +1,112 @@
+version: '3.8'
+
+services:
+  # RabbitMQ - Message Broker (Shared)
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"   # AMQP port
+      - "15672:15672" # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network
+
+  # PostgreSQL for OrderService
+  order_db:
+    image: postgres:17
+    container_name: order_db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: order_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - order_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d order_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network
+
+  # PostgreSQL for StockService
+  stock_db:
+    image: postgres:17
+    container_name: stock_db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: stock_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - stock_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d stock_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network
+
+  # OrderService (Go)
+  order_service:
+    build:
+      context: .
+      dockerfile: OrderService/Dockerfile
+    container_name: order_service
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      DB_CONNECTION_STRING: "postgresql://user:password@order_db:5432/order_db?sslmode=disable"
+      RABBITMQ_CONNECTION_STRING: "amqp://guest:guest@rabbitmq:5672/"
+      OUTBOX_POLL_INTERVAL_SECONDS: "5"
+    depends_on:
+      order_db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # StockService (.NET)
+  stock_service:
+    build:
+      context: .
+      dockerfile: StockService/Dockerfile
+    container_name: stock_service
+    ports:
+      - "8081:8080"
+      - "8082:8081"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: "http://+:8080;http://+:8081"
+      ConnectionStrings__StockDbConnection: "Host=stock_db;Port=5432;Database=stock_db;Username=user;Password=password"
+    depends_on:
+      stock_db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  order_db_data:
+  stock_db_data:
