@@ -12,8 +12,8 @@ type OrderRepository struct {
 	db *sql.DB
 }
 
-func (r *OrderRepository) DB() {
-	panic("unimplemented")
+func (r *OrderRepository) DB() *sql.DB {
+	return r.db
 }
 
 func NewOrderRepository(db *sql.DB) *OrderRepository {

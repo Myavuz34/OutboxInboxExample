@@ -62,8 +62,8 @@ services:
   # OrderService (Go)
   order_service:
     build:
-      context: .
-      dockerfile: OrderService/Dockerfile
+      context: ./OrderService
+      dockerfile: Dockerfile
     container_name: order_service
     ports:
       - "8080:8080"
@@ -85,7 +85,7 @@ services:
   stock_service:
     build:
       context: .
-      dockerfile: StockService/Dockerfile
+      dockerfile: ./StockService/Dockerfile
     container_name: stock_service
     ports:
       - "8081:8080"
