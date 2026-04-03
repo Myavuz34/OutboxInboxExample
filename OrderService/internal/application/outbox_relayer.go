@@ -2,20 +2,20 @@ package application
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"time"
 
-	"order_service/internal/infrastructure/postgres"
-	"order_service/internal/infrastructure/rabbitmq"
+	"order_service/internal/application/ports"
+	"order_service/internal/domain"
 )
 
 type OutboxRelayer struct {
-	outboxRepo     *postgres.OutboxRepository
-	eventPublisher *rabbitmq.EventPublisher
+	outboxRepo     ports.OutboxRepository
+	eventPublisher ports.EventPublisher
 	pollInterval   time.Duration
 }
 
-func NewOutboxRelayer(obr *postgres.OutboxRepository, ep *rabbitmq.EventPublisher, interval time.Duration) *OutboxRelayer {
+func NewOutboxRelayer(obr ports.OutboxRepository, ep ports.EventPublisher, interval time.Duration) *OutboxRelayer {
 	return &OutboxRelayer{
 		outboxRepo:     obr,
 		eventPublisher: ep,
@@ -27,10 +27,12 @@ func (r *OutboxRelayer) Start(ctx context.Context) {
 	ticker := time.NewTicker(r.pollInterval)
 	defer ticker.Stop()
 
+	slog.Info("Outbox Relayer started", "poll_interval", r.pollInterval)
+
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Outbox Relayer: Shutting down.")
+			slog.Info("Outbox Relayer shutting down")
 			return
 		case <-ticker.C:
 			r.processPendingMessages(ctx)
@@ -39,10 +41,18 @@ func (r *OutboxRelayer) Start(ctx context.Context) {
 }
 
 func (r *OutboxRelayer) processPendingMessages(ctx context.Context) {
-	log.Println("Outbox Relayer: Checking for pending messages...")
-	messages, err := r.outboxRepo.GetPendingMessages(ctx)
+	slog.Debug("Outbox Relayer checking for pending messages")
+
+	tx, err := r.outboxRepo.DB().BeginTx(ctx, nil)
 	if err != nil {
-		log.Printf("Outbox Relayer Error fetching messages: %v", err)
+		slog.Error("Outbox Relayer failed to begin transaction", "error", err)
+		return
+	}
+	defer tx.Rollback()
+
+	messages, err := r.outboxRepo.GetAndLockPendingMessages(ctx, tx)
+	if err != nil {
+		slog.Error("Outbox Relayer failed to fetch messages", "error", err)
 		return
 	}
 
@@ -50,20 +60,25 @@ func (r *OutboxRelayer) processPendingMessages(ctx context.Context) {
 		return
 	}
 
+	slog.Info("Outbox Relayer processing messages", "count", len(messages))
+
 	for _, msg := range messages {
-		err := r.eventPublisher.Publish(ctx, &msg)
-		if err != nil {
-			log.Printf("Outbox Relayer Error publishing message %s (Type: %s): %v", msg.ID, msg.Type, err)
-			// In a real system, you might increment a retry count or move to a dead-letter queue.
-			// For simplicity, we just log and continue. The message remains 'Pending' for next poll.
+		if err := r.eventPublisher.Publish(ctx, &msg); err != nil {
+			slog.Error("Outbox Relayer failed to publish message",
+				"message_id", msg.ID, "type", msg.Type, "error", err)
 			continue
 		}
 
-		err = r.outboxRepo.UpdateMessageStatus(ctx, msg.ID, "Sent")
-		if err != nil {
-			log.Printf("Outbox Relayer Error updating message status %s: %v", msg.ID, err)
+		if err := r.outboxRepo.UpdateMessageStatusTx(ctx, tx, msg.ID, domain.StatusSent); err != nil {
+			slog.Error("Outbox Relayer failed to update message status",
+				"message_id", msg.ID, "error", err)
 		} else {
-			log.Printf("Outbox Relayer: Message %s (Type: %s) status updated to Sent.", msg.ID, msg.Type)
+			slog.Info("Outbox Relayer message sent",
+				"message_id", msg.ID, "type", msg.Type)
 		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		slog.Error("Outbox Relayer failed to commit transaction", "error", err)
 	}
 }

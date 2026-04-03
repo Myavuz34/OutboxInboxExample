@@ -14,13 +14,17 @@ public class StockDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        modelBuilder.Entity<InboxMessage>()
-            .HasIndex(m => m.MessageId)
-            .IsUnique(); // Ensure MessageId is unique
+        modelBuilder.Entity<InboxMessage>(entity =>
+        {
+            entity.HasIndex(m => m.MessageId).IsUnique();
+            entity.HasIndex(m => m.Status);
+            entity.HasIndex(m => m.ReceivedOn);
+        });
 
-        // Optional: Configure precision for decimal types if needed
-        modelBuilder.Entity<Product>()
-            .Property(p => p.Price)
-            .HasColumnType("decimal(10, 2)");
+        modelBuilder.Entity<Product>(entity =>
+        {
+            entity.Property(p => p.Price).HasColumnType("decimal(10, 2)");
+            entity.Property(p => p.RowVersion).IsRowVersion();
+        });
     }
 }

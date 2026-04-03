@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace StockService.Domain;
 
 public class Product
@@ -6,4 +8,7 @@ public class Product
     public string Name { get; set; } = string.Empty;
     public int StockQuantity { get; set; }
     public decimal Price { get; set; }
+
+    [Timestamp]
+    public uint RowVersion { get; set; }
 }

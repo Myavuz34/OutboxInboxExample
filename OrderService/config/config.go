@@ -1,7 +1,8 @@
 package config
 
 import (
-	"log"
+	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"time"
@@ -11,10 +12,11 @@ type Config struct {
 	Port               string
 	DBConnStr          string
 	RabbitMQConnStr    string
+	ExchangeName       string
 	OutboxPollInterval time.Duration
 }
 
-func LoadConfig() *Config {
+func LoadConfig() (*Config, error) {
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -22,29 +24,33 @@ func LoadConfig() *Config {
 
 	dbConnStr := os.Getenv("DB_CONNECTION_STRING")
 	if dbConnStr == "" {
-		dbConnStr = "postgresql://user:password@order_db:5432/order_db?sslmode=disable"
-		log.Printf("DB_CONNECTION_STRING not set, using default: %s", dbConnStr)
+		return nil, fmt.Errorf("DB_CONNECTION_STRING environment variable is required")
 	}
 
 	rabbitMQConnStr := os.Getenv("RABBITMQ_CONNECTION_STRING")
 	if rabbitMQConnStr == "" {
-		rabbitMQConnStr = "amqp://guest:guest@rabbitmq:5672/"
-		log.Printf("RABBITMQ_CONNECTION_STRING not set, using default: %s", rabbitMQConnStr)
+		return nil, fmt.Errorf("RABBITMQ_CONNECTION_STRING environment variable is required")
 	}
 
-	outboxPollIntervalStr := os.Getenv("OUTBOX_POLL_INTERVAL_SECONDS")
+	exchangeName := os.Getenv("RABBITMQ_EXCHANGE_NAME")
+	if exchangeName == "" {
+		exchangeName = "order_events"
+	}
+
 	outboxPollIntervalSec := 5
-	if outboxPollIntervalStr != "" {
-		if val, err := strconv.Atoi(outboxPollIntervalStr); err == nil {
-			outboxPollIntervalSec = val
+	if val := os.Getenv("OUTBOX_POLL_INTERVAL_SECONDS"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil {
+			outboxPollIntervalSec = parsed
+		} else {
+			slog.Warn("Invalid OUTBOX_POLL_INTERVAL_SECONDS, using default", "value", val, "default", 5)
 		}
 	}
-	outboxPollInterval := time.Duration(outboxPollIntervalSec) * time.Second
 
 	return &Config{
 		Port:               port,
 		DBConnStr:          dbConnStr,
 		RabbitMQConnStr:    rabbitMQConnStr,
-		OutboxPollInterval: outboxPollInterval,
-	}
+		ExchangeName:       exchangeName,
+		OutboxPollInterval: time.Duration(outboxPollIntervalSec) * time.Second,
+	}, nil
 }

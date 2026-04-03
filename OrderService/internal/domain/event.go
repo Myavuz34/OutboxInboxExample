@@ -59,6 +59,6 @@ func NewOutboxMessage(aggregateID uuid.UUID, aggregateType, eventType string, ev
 		Type:          eventType,
 		Payload:       eventPayload,
 		OccurredOn:    time.Now(),
-		Status:        "Pending",
+		Status:        StatusPending,
 	}
 }

@@ -37,7 +37,7 @@ func NewOrder(customerID uuid.UUID, items []OrderItem) *OrderAggregate {
 		ID:          uuid.New(),
 		CustomerID:  customerID,
 		OrderDate:   time.Now(),
-		Status:      "Pending",
+		Status:      StatusPending,
 		TotalAmount: totalAmount,
 		Items:       items,
 	}

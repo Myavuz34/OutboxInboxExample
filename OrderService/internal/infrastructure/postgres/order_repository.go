@@ -27,12 +27,21 @@ func (r *OrderRepository) Save(ctx context.Context, tx *sql.Tx, order *domain.Or
 		return fmt.Errorf("failed to insert order: %w", err)
 	}
 
-	for _, item := range order.Items {
-		_, err = tx.ExecContext(ctx, `INSERT INTO order_items (id, order_id, product_id, quantity, price) VALUES ($1, $2, $3, $4, $5)`,
-			item.ID, order.ID, item.ProductID, item.Quantity, item.Price)
-		if err != nil {
-			return fmt.Errorf("failed to insert order item: %w", err)
+	if len(order.Items) > 0 {
+		query := "INSERT INTO order_items (id, order_id, product_id, quantity, price) VALUES "
+		args := make([]interface{}, 0, len(order.Items)*5)
+		for i, item := range order.Items {
+			base := i * 5
+			if i > 0 {
+				query += ", "
+			}
+			query += fmt.Sprintf("($%d, $%d, $%d, $%d, $%d)", base+1, base+2, base+3, base+4, base+5)
+			args = append(args, item.ID, order.ID, item.ProductID, item.Quantity, item.Price)
+		}
+		if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+			return fmt.Errorf("failed to insert order items: %w", err)
 		}
 	}
+
 	return nil
 }

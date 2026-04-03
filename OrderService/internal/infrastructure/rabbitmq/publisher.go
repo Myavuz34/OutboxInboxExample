@@ -3,7 +3,7 @@ package rabbitmq
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"order_service/internal/domain"
@@ -12,7 +12,8 @@ import (
 )
 
 type EventPublisher struct {
-	channel *amqp.Channel
+	channel      *amqp.Channel
+	exchangeName string
 }
 
 func NewRabbitMQChannel(connStr, exchangeName string) (*amqp.Channel, error) {
@@ -27,25 +28,17 @@ func NewRabbitMQChannel(connStr, exchangeName string) (*amqp.Channel, error) {
 		return nil, fmt.Errorf("failed to open a channel: %w", err)
 	}
 
-	err = ch.ExchangeDeclare(
-		exchangeName, // name
-		"topic",      // type
-		true,         // durable
-		false,        // auto-deleted
-		false,        // internal
-		false,        // no-wait
-		nil,          // arguments
-	)
-	if err != nil {
+	if err := ch.ExchangeDeclare(exchangeName, "topic", true, false, false, false, nil); err != nil {
 		ch.Close()
 		conn.Close()
-		return nil, fmt.Errorf("failed to declare an exchange: %w", err)
+		return nil, fmt.Errorf("failed to declare exchange: %w", err)
 	}
+
 	return ch, nil
 }
 
-func NewEventPublisher(ch *amqp.Channel) *EventPublisher {
-	return &EventPublisher{channel: ch}
+func NewEventPublisher(ch *amqp.Channel, exchangeName string) *EventPublisher {
+	return &EventPublisher{channel: ch, exchangeName: exchangeName}
 }
 
 func (p *EventPublisher) Publish(ctx context.Context, msg *domain.OutboxMessage) error {
@@ -53,19 +46,26 @@ func (p *EventPublisher) Publish(ctx context.Context, msg *domain.OutboxMessage)
 	defer cancel()
 
 	err := p.channel.PublishWithContext(publishCtx,
-		"order_events", // exchange
-		msg.Type,       // routing key (event type)
-		false,          // mandatory
-		false,          // immediate
+		p.exchangeName,
+		msg.Type,
+		false,
+		false,
 		amqp.Publishing{
 			ContentType: "application/json",
 			Body:        msg.Payload,
-			MessageId:   msg.ID.String(), // Use outbox message ID as RabbitMQ message ID for idempotency
+			MessageId:   msg.ID.String(),
 			Timestamp:   time.Now(),
 		})
 	if err != nil {
 		return fmt.Errorf("failed to publish message to RabbitMQ: %w", err)
 	}
-	log.Printf("Published message %s (Type: %s) to RabbitMQ.", msg.ID, msg.Type)
+
+	slog.Info("Published message to RabbitMQ",
+		"message_id", msg.ID, "type", msg.Type, "exchange", p.exchangeName)
 	return nil
+}
+
+// Channel returns the underlying AMQP channel for health checks
+func (p *EventPublisher) Channel() *amqp.Channel {
+	return p.channel
 }
